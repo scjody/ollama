@@ -900,6 +900,48 @@ func PullHandler(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func StopHandler(cmd *cobra.Command, args []string) error {
+	client, err := api.ClientFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	running, err := client.ListRunning(cmd.Context())
+	if err != nil {
+		return err
+	}
+	runningModels := make(map[string]bool)
+	for _, m := range running.Models {
+		runningModels[m.Name] = true
+	}
+
+	fn := func(response api.GenerateResponse) error {
+		return nil
+	}
+
+	for _, name := range args {
+		_, running := runningModels[name]
+		if !running {
+			fmt.Printf("Not running: '%s'\n", name)
+			continue
+		}
+
+		stopReq := api.GenerateRequest{
+			Model:     name,
+			KeepAlive: &api.Duration{Duration: 0},
+		}
+		if err := client.Generate(cmd.Context(), &stopReq, fn); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+		fmt.Printf("stopped '%s'\n", name)
+	}
+
+	return nil
+}
+
 type generateContextKey string
 
 type runOptions struct {
@@ -1378,6 +1420,14 @@ func NewCLI() *cobra.Command {
 		RunE:    DeleteHandler,
 	}
 
+	stopCmd := &cobra.Command{
+		Use:     "stop MODEL [MODEL...]",
+		Short:   "Stop a model",
+		Args:    cobra.MinimumNArgs(1),
+		PreRunE: checkServerHeartbeat,
+		RunE:    StopHandler,
+	}
+
 	envVars := envconfig.AsMap()
 
 	envs := []envconfig.EnvVar{envVars["OLLAMA_HOST"]}
@@ -1393,6 +1443,7 @@ func NewCLI() *cobra.Command {
 		copyCmd,
 		deleteCmd,
 		serveCmd,
+		stopCmd,
 	} {
 		switch cmd {
 		case runCmd:
@@ -1429,6 +1480,7 @@ func NewCLI() *cobra.Command {
 		psCmd,
 		copyCmd,
 		deleteCmd,
+		stopCmd,
 	)
 
 	return rootCmd
